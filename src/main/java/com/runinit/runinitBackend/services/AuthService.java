@@ -4,6 +4,7 @@ import com.runinit.runinitBackend.dtos.AuthResponse;
 import com.runinit.runinitBackend.dtos.LoginRequest;
 import com.runinit.runinitBackend.dtos.RegisterRequest;
 import com.runinit.runinitBackend.entities.Usuario;
+import com.runinit.runinitBackend.exceptions.EmailJaCadastradoException;
 import com.runinit.runinitBackend.repositories.UsuarioRepository;
 import com.runinit.runinitBackend.security.JwtService;
 import lombok.RequiredArgsConstructor;
@@ -11,34 +12,51 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final UsuarioRepository repository;
+    private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
 
-    public AuthResponse register(RegisterRequest request) {
-        Usuario user = new Usuario();
-        user.setNome(request.getNome());
-        user.setEmail(request.getEmail());
-        user.setSenhaHash(passwordEncoder.encode(request.getSenha()));
-        user.setDataNascimento(request.getDataNascimento());
+    @Transactional
+    public AuthResponse registrarUsuario(RegisterRequest request) {
+        String email = normalizarEmail(request.getEmail());
 
-        repository.save(user);
-        var jwtToken = jwtService.generateToken(user);
+        if (usuarioRepository.existsByEmail(email)) {
+            throw new EmailJaCadastradoException(email);
+        }
+
+        Usuario usuario = new Usuario();
+        usuario.setNome(request.getNome());
+        usuario.setEmail(email);
+        usuario.setSenhaHash(passwordEncoder.encode(request.getSenha()));
+        usuario.setDataNascimento(request.getDataNascimento());
+
+        Usuario salvo = usuarioRepository.save(usuario);
+
+        String jwtToken = jwtService.generateToken(salvo);
         return new AuthResponse(jwtToken);
     }
 
     public AuthResponse login(LoginRequest request) {
+        String email = normalizarEmail(request.getEmail());
+
         authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getSenha())
+                new UsernamePasswordAuthenticationToken(email, request.getSenha())
         );
-        var user = repository.findByEmail(request.getEmail()).orElseThrow();
-        var jwtToken = jwtService.generateToken(user);
+
+        Usuario usuario = usuarioRepository.findByEmail(email).orElseThrow();
+
+        String jwtToken = jwtService.generateToken(usuario);
         return new AuthResponse(jwtToken);
+    }
+
+    private String normalizarEmail(String email) {
+        return email.trim().toLowerCase();
     }
 }
